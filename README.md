@@ -4,14 +4,17 @@ This application provides real-time speech recognition and translation from Fren
 
 ## Features
 
-- 🎤 **Continuous Speech Recognition**: Real-time speech detection in any supported language
-- 🌐 **Azure AI Translation**: High-quality translation using Azure Translator (free tier supported)
-- 📺 **OBS Integration**: Outputs translations to a text file for OBS Text Source
-- 🔄 **Real-time Updates**: Immediate translation updates as you speak
-- 🛡️ **Error Handling**: Robust error handling and fallback mechanisms
-- ⚙️ **Highly Configurable**: Easy customization via config.ini and .env files
-- 🌍 **Multi-Language Support**: Translate between any supported language pairs
-- 📝 **Logging**: Optional translation logging and timestamping
+- **Continuous Speech Recognition**: Real-time speech detection in any supported language
+- **Azure AI Translation**: High-quality translation using Azure Translator (free tier supported)
+- **Chat-Like Message Display**: Individual translations appear and disappear like Twitch chat messages
+- **OBS Integration**: Outputs translations to a text file for OBS Text Source
+- **Multi-Line Buffer**: Display multiple lines at once (configurable 3-4 lines)
+- **Per-Line Expiry**: Each line expires independently after a configurable timeout
+- **Daily Voice Logging**: Automatically logs original French speech to daily files
+- **Error Handling**: Robust error handling and fallback mechanisms
+- **Highly Configurable**: Easy customization via config.ini and .env files
+- **Multi-Language Support**: Translate between any supported language pairs
+- **Modular Architecture**: Clean, maintainable code structure
 
 ## Prerequisites
 
@@ -74,10 +77,20 @@ energy_threshold = 0        # Microphone sensitivity (0 = auto)
 #### **Output Settings**
 ```ini
 [Output]
-obs_file = obs_translation.txt    # File for OBS to read
-log_file = translation_log.txt    # Optional logging file
-include_timestamp = false         # Add timestamps to translations
-timestamp_format = [%%H:%%M:%%S]  # Timestamp format
+obs_file = obs_translation.txt           # File for OBS to read
+log_file = translation_log.txt           # Optional logging file
+include_timestamp = false                # Add timestamps to translations
+timestamp_format = [%%H:%%M:%%S]         # Timestamp format
+
+# Chat-like message buffer for OBS
+obs_buffer_lines = 3                     # Number of lines visible at once
+obs_auto_clear_timeout = 10              # Seconds before each line expires
+obs_line_separator = \n                  # Line separator in OBS file
+
+# Daily voice logging
+enable_voice_log = true                  # Log original French speech
+voice_log_dir = voice_logs               # Directory for daily logs
+voice_log_prefix = voice_log_            # Prefix for log files
 ```
 
 #### **Display Settings**
@@ -160,6 +173,8 @@ fallback_mode = show_original    # What to do when translation fails
 
 ## OBS Studio Integration
 
+### Setting Up Text Source
+
 1. **Add Text Source in OBS**:
    - In OBS, add a new Source → Text (GDI+)
    - Name it "Live Translation" or similar
@@ -168,30 +183,97 @@ fallback_mode = show_original    # What to do when translation fails
    - Check "Read from file"
    - Browse and select `obs_translation.txt` from this project directory
    - Customize font, size, color as desired
-   - Position the text on your stream layout
+   - Position the text on your stream layout (usually bottom of screen)
 
 3. **Auto-Refresh**:
    - The text will automatically update as new translations are generated
    - No need to manually refresh
 
-## Configuration Options
+### Chat-Like Message Display
 
-You can modify these settings in `main.py`:
+The OBS buffer system creates a chat-like experience where translation messages appear and disappear individually:
 
-```python
-translator = RealTimeTranslator(
-    azure_key=azure_key,
-    azure_region="eastus",  # Change to your Azure region
-    output_file="obs_translation.txt"  # Change output filename if needed
-)
+**How It Works:**
+- Each translation appears as a new line in the buffer
+- Multiple lines are visible at once (default: 3 lines)
+- Each line expires independently after a timeout (default: 10 seconds)
+- New messages push old ones up as they appear
+- Lines fade away individually, like Twitch chat messages
+
+**Example Timeline:**
+```
+Time 0s:  [Line 1 appears]
+Time 2s:  [Line 1] [Line 2 appears]
+Time 4s:  [Line 1] [Line 2] [Line 3 appears]
+Time 6s:  [Line 1] [Line 2] [Line 3] [Line 4 appears - Line 1 pushed out]
+Time 10s: [Line 2] [Line 3] [Line 4] (Line 1 expired)
+Time 12s: [Line 3] [Line 4] (Line 2 expired)
+```
+
+**Configuration:**
+```ini
+obs_buffer_lines = 3           # Number of lines visible at once
+obs_auto_clear_timeout = 10    # Seconds before each line expires
+```
+
+**Tips:**
+- Use 3-4 lines for optimal readability
+- Set timeout to 8-12 seconds for most content
+- For slower speech, increase timeout to 15-20 seconds
+- For fast-paced streams, decrease to 5-8 seconds
+
+## Daily Voice Logging
+
+The application automatically logs your original French speech to daily files:
+
+**Features:**
+- Creates one log file per day: `voice_logs/voice_log_2025-01-15.txt`
+- Includes timestamps for each speech entry
+- Preserves original French text for review
+- Automatic session start/end markers
+
+**Example Log File:**
+```
+=== Session started at 2025-01-15 14:30:45 ===
+[14:30:52] Bonjour tout le monde!
+[14:31:15] Aujourd'hui on va jouer à ce nouveau jeu
+[14:32:03] C'est vraiment incroyable
+=== Session ended at 2025-01-15 15:45:20 ===
+```
+
+**Use Cases:**
+- Review what you said during streams
+- Track vocabulary and phrases
+- Create transcripts for content planning
+- Analyze speaking patterns
+
+## Project Structure
+
+```
+subtitle/
+├── main.py                     # Application entry point
+├── translator.py               # Core translation engine
+├── obs_buffer.py              # Chat-like message buffer
+├── voice_logger.py            # Daily voice logging
+├── config/
+│   ├── __init__.py           # Configuration manager
+│   └── defaults.py           # Default settings
+├── test/
+│   ├── test_obs_buffer.py    # Buffer testing
+│   ├── demo_config.py        # Configuration demo
+│   └── demo_modular.py       # Modular system demo
+├── voice_logs/               # Daily log files (auto-created)
+├── config.ini                # User configuration
+├── .env                      # API keys
+└── requirements.txt          # Python dependencies
 ```
 
 ## Troubleshooting
 
-### "AZURE_TRANSLATOR_KEY non trouvée"
+### "AZURE_TRANSLATOR_KEY not found"
 - Make sure you've set the environment variable correctly
 - Restart your terminal/PowerShell after setting the variable
-- The app will work in demo mode without translation if no key is provided
+- Check your `.env` file exists and contains the key
 
 ### "ModuleNotFoundError: No module named 'pyaudio'"
 - On Windows, PyAudio can be tricky to install
@@ -211,6 +293,11 @@ translator = RealTimeTranslator(
 - Make sure OBS has permission to read the file
 - Check that the file path in OBS matches the output file location
 - Try refreshing the OBS source manually
+
+### Lines Not Expiring
+- Check `obs_auto_clear_timeout` value in config.ini
+- Verify the cleanup thread is running (console should show buffer info at startup)
+- Test with `test/test_obs_buffer.py` to verify buffer behavior
 
 ## Performance Tips
 

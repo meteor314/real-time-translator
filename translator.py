@@ -92,7 +92,7 @@ class RealTimeTranslator:
     def show_obs_buffer_info(self):
         """Show information about OBS buffer settings"""
         buffer_info = self.obs_buffer.get_buffer_info()
-        print(f"OBS Buffer: {buffer_info['max_lines']} lines, {buffer_info['timeout']}s auto-clear")
+        print(f"OBS Buffer: {buffer_info['max_lines']} lines, each expires after {buffer_info['line_timeout']}s")
         
     def setup_microphone(self):
         """Setup and calibrate microphone"""
