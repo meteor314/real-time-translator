@@ -18,11 +18,12 @@ DEFAULT_CONFIG = {
     },
     'Audio': {
         'ambient_noise_duration': '3',
-        'listen_timeout': '2',
-        'phrase_time_limit': '10',
+        'listen_timeout': '3',
+        'phrase_time_limit': '15',
         'energy_threshold': '0',
         'dynamic_energy_threshold': 'true',
-        'pause_threshold': '0.8'
+        'pause_threshold': '1.5',
+        'non_speaking_duration': '0.8'
     },
     'Output': {
         'obs_file': 'obs_translation.txt',
@@ -41,8 +42,8 @@ DEFAULT_CONFIG = {
         'show_original': 'true',
         'show_translation': 'true',
         'show_confidence': 'false',
-        'original_prefix': 'FR:',
-        'translation_prefix': 'EN:',
+        'original_prefix': 'Original:',
+        'translation_prefix': 'Translation:',
         'use_colors': 'false'
     },
     'Performance': {

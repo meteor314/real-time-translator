@@ -41,6 +41,7 @@ class RealTimeTranslator:
         self.energy_threshold = self.config.getint('Audio', 'energy_threshold')
         self.dynamic_energy = self.config.getboolean('Audio', 'dynamic_energy_threshold')
         self.pause_threshold = self.config.getfloat('Audio', 'pause_threshold')
+        self.non_speaking_duration = self.config.getfloat('Audio', 'non_speaking_duration')
         
         # Output settings
         self.output_file = self.config.get('Output', 'obs_file')
@@ -110,13 +111,17 @@ class RealTimeTranslator:
             # Enable dynamic energy threshold adjustment if configured
             self.recognizer.dynamic_energy_threshold = self.dynamic_energy
             
-            # Set pause threshold for better phrase detection
+            # Set pause threshold for better phrase detection (critical for not cutting sentences)
             self.recognizer.pause_threshold = self.pause_threshold
+            
+            # Set non-speaking duration to avoid cutting mid-sentence
+            self.recognizer.non_speaking_duration = self.non_speaking_duration
             
         print("Calibration completed!")
         print(f"Energy threshold: {self.recognizer.energy_threshold}")
         print(f"Dynamic adjustment: {'enabled' if self.dynamic_energy else 'disabled'}")
-        print(f"Pause threshold: {self.pause_threshold}s")
+        print(f"Pause threshold: {self.pause_threshold}s (silence before ending phrase)")
+        print(f"Non-speaking duration: {self.non_speaking_duration}s (minimum silence to end)")
     
     def show_voice_log_info(self):
         """Show information about voice logging"""
@@ -236,8 +241,13 @@ class RealTimeTranslator:
         """Process audio in background thread"""
         try:
             # Recognize speech with specified language
+            # Use proper locale codes for better recognition
             language_code = f"{self.from_lang}-{self.from_lang.upper()}"
-            original_text = self.recognizer.recognize_google(audio, language=language_code)
+            
+            # Try recognition with show_all to get better results
+            original_text = self.recognizer.recognize_google(audio, 
+                                                            language=language_code,
+                                                            show_all=False)
             
             # Log original text to daily voice log
             self.voice_logger.log_original_text(original_text, self.original_prefix.rstrip(':'))

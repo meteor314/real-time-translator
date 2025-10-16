@@ -1,6 +1,8 @@
-# Real-Time French to English Translation for OBS
+# Real-Time Language Translation for OBS
 
-This application provides real-time speech recognition and translation from French to English, specifically designed for OBS Studio live streaming. It continuously listens to your microphone, recognizes French speech using Google Speech Recognition, translates it to English using Azure Translator, and writes the translation to a text file that OBS can display.
+This application provides real-time speech recognition and translation between any supported languages, specifically designed for OBS Studio live streaming. It continuously listens to your microphone, recognizes speech using Google Speech Recognition, translates it using Azure Translator, and writes the translation to a text file that OBS can display.
+
+**Translate between 100+ languages** including French, English, Spanish, German, Japanese, Korean, Chinese, Arabic, and many more!
 
 ## Features
 
@@ -65,14 +67,24 @@ to_language_name = English
 - `ko` = Korean, `zh` = Chinese, `ar` = Arabic, `hi` = Hindi
 - And many more! See [Azure Translator Languages](https://docs.microsoft.com/en-us/azure/cognitive-services/translator/language-support)
 
-#### **Audio Settings**
+#### **Audio Settings (Critical for Quality!)**
 ```ini
 [Audio]
-ambient_noise_duration = 2   # Microphone calibration time (seconds)
-listen_timeout = 1          # How long to wait for speech
-phrase_time_limit = 5       # Maximum phrase length (seconds)
-energy_threshold = 0        # Microphone sensitivity (0 = auto)
+ambient_noise_duration = 3   # Microphone calibration time (seconds)
+listen_timeout = 3          # How long to wait for speech to START
+phrase_time_limit = 15      # Maximum phrase length (seconds, increase for long sentences)
+energy_threshold = 0        # Microphone sensitivity (0 = auto, recommended)
+
+# CRITICAL: These prevent cutting your sentences prematurely!
+pause_threshold = 1.5       # Silence duration before ending phrase (increase if cut mid-sentence)
+non_speaking_duration = 0.8 # Minimum silence to end phrase
 ```
+
+**Fixing Premature Cutoff Issues:**
+- If your sentences are being cut before you finish: **Increase `pause_threshold` to 1.5-2.0**
+- If it's too sensitive to pauses: **Increase `non_speaking_duration` to 1.0-1.2**
+- If it waits too long: **Decrease `pause_threshold` to 1.0-1.2**
+- For longer sentences: **Increase `phrase_time_limit` to 20-30**
 
 #### **Output Settings**
 ```ini
@@ -157,19 +169,28 @@ fallback_mode = show_original    # What to do when translation fails
 
 ## Usage
 
-1. **Start the translator**:
+1. **Configure your languages** in `config.ini`:
+   ```ini
+   [Translation]
+   from_language = fr          # Your spoken language (e.g., fr, en, es, de, ja)
+   to_language = en           # Target translation language
+   from_language_name = French
+   to_language_name = English
+   ```
+
+2. **Start the translator**:
    ```powershell
    python main.py
    ```
 
-2. **The application will**:
+3. **The application will**:
    - Calibrate your microphone for ambient noise
-   - Start listening continuously for French speech
-   - Display recognized French text in the console
-   - Show English translations in the console
+   - Start listening continuously for your chosen language
+   - Display recognized speech text in the console
+   - Show translations in the console
    - Write translations to `obs_translation.txt`
 
-3. **Stop the application**: Press `Ctrl+C`
+4. **Stop the application**: Press `Ctrl+C`
 
 ## OBS Studio Integration
 
@@ -224,7 +245,7 @@ obs_auto_clear_timeout = 10    # Seconds before each line expires
 
 ## Daily Voice Logging
 
-The application automatically logs your original French speech to daily files:
+The application automatically logs your original speech to daily files:
 
 **Features:**
 - Creates one log file per day: `voice_logs/voice_log_2025-01-15.txt`
@@ -232,7 +253,7 @@ The application automatically logs your original French speech to daily files:
 - Preserves original French text for review
 - Automatic session start/end markers
 
-**Example Log File:**
+**Example Log File (French to English):**
 ```
 === Session started at 2025-01-15 14:30:45 ===
 [14:30:52] Bonjour tout le monde!
@@ -240,6 +261,8 @@ The application automatically logs your original French speech to daily files:
 [14:32:03] C'est vraiment incroyable
 === Session ended at 2025-01-15 15:45:20 ===
 ```
+
+Works with any language pair you configure!
 
 **Use Cases:**
 - Review what you said during streams
@@ -284,10 +307,36 @@ subtitle/
 - Try speaking closer to the microphone
 - Check Windows microphone permissions
 
+### Speech Recognition Issues
+
+**⚠️ For detailed troubleshooting, see [SPEECH_RECOGNITION_GUIDE.md](SPEECH_RECOGNITION_GUIDE.md)**
+
+**Quick Fixes:**
+
+**Problem: Sentences cut before I finish speaking** 🔴 MOST COMMON
+- **Solution**: Increase `pause_threshold` in config.ini to 1.5 or 2.0
+- This makes the system wait longer during pauses before ending your phrase
+- Also try increasing `non_speaking_duration` to 1.0
+
+**Problem: Wrong words recognized** (e.g., "qu'il tourne" → "cocotier tourne")
+- This is a limitation of Google Speech Recognition API
+- Improve by: speaking more clearly, better microphone, less background noise
+- See the full guide for detailed solutions
+- **Note**: Some words will always be misrecognized - this is normal
+
+**Problem: Missing the beginning of sentences**
+- Increase `listen_timeout` to 3-4 seconds
+- Ensure `energy_threshold = 0` for auto-adjustment
+
+**Problem: Recognition too slow/fast**
+- Too slow: Decrease `pause_threshold` to 1.0-1.2
+- Too fast (cutting): Increase `pause_threshold` to 1.5-2.0
+
 ### Translation Quality
 - Speak clearly and at a moderate pace
 - Pause briefly between sentences for better recognition
-- Background noise can affect speech recognition quality
+- Background noise significantly affects speech recognition quality
+- Better microphone = better recognition accuracy
 
 ### OBS Text Not Updating
 - Make sure OBS has permission to read the file
