@@ -10,9 +10,45 @@ import time
 import threading
 import os
 import uuid
+import io
 from datetime import datetime
 from voice_logger import VoiceLogger
 from obs_buffer import OBSBufferManager
+
+# NLTK imports for punctuation and sentence tokenization
+try:
+    import nltk
+    from nltk import pos_tag
+    from nltk.tokenize import word_tokenize
+    
+    # Download required NLTK data
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt', quiet=True)
+    
+    try:
+        nltk.data.find('taggers/averaged_perceptron_tagger')
+    except LookupError:
+        nltk.download('averaged_perceptron_tagger', quiet=True)
+    
+    NLTK_AVAILABLE = True
+except ImportError:
+    NLTK_AVAILABLE = False
+
+# Whisper imports (for better speech recognition, especially for French)
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+
+# PyAudio for audio handling with Whisper
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
 
 
 class RealTimeTranslator:
@@ -60,6 +96,13 @@ class RealTimeTranslator:
         # Advanced settings
         self.debug_mode = self.config.getboolean('Advanced', 'debug_mode')
         self.fallback_mode = self.config.get('Advanced', 'fallback_mode')
+        self.recognition_service = self.config.get('Advanced', 'recognition_service')
+        
+        # Whisper settings (if using Whisper for recognition)
+        if self.recognition_service == 'whisper':
+            self.whisper_model = self.config.get('Advanced', 'whisper_model')
+            self.whisper_device = self.config.get('Advanced', 'whisper_device')
+            self.whisper_processor = None  # Will be loaded on first use
         
         # Initialize voice logger
         self.voice_logger = VoiceLogger(config_manager)
@@ -94,6 +137,215 @@ class RealTimeTranslator:
         """Show information about OBS buffer settings"""
         buffer_info = self.obs_buffer.get_buffer_info()
         print(f"OBS Buffer: {buffer_info['max_lines']} lines, each expires after {buffer_info['line_timeout']}s")
+    
+    def restore_punctuation(self, text):
+        """
+        Restore punctuation to text using NLTK for better accuracy
+        Detects sentence boundaries and adds appropriate punctuation
+        """
+        if not text or not text.strip():
+            return text
+        
+        if not NLTK_AVAILABLE:
+            # Fallback: simple heuristic if NLTK not available
+            return self._fallback_punctuation(text)
+        
+        try:
+            text = text.strip()
+            
+            # Check if text already has ending punctuation
+            if text and text[-1] in '.!?,;:':
+                return text
+            
+            # Tokenize into words
+            tokens = word_tokenize(text.lower())
+            
+            # Tag parts of speech
+            pos_tags = pos_tag(tokens)
+            
+            # Check for question patterns
+            question_indicators = ['WDT', 'WP', 'WP$', 'WRB']  # NLTK POS tags for question words
+            has_question_word = any(tag in question_indicators for _, tag in pos_tags)
+            
+            # Check for auxiliary verbs at the beginning (inverted word order = question)
+            first_token_tag = pos_tags[0][1] if pos_tags else None
+            auxiliary_verbs = ['VB', 'VBD', 'VBP', 'VBZ']
+            starts_with_verb = first_token_tag in auxiliary_verbs
+            
+            # Determine punctuation
+            if has_question_word or (starts_with_verb and len(tokens) > 2):
+                # Likely a question
+                text += '?'
+            elif any(token in ['wow', 'excellent', 'amazing', 'incredible', 'unbelievable'] for token, _ in pos_tags):
+                # Emphatic statements
+                text += '!'
+            else:
+                # Default to period for statement
+                text += '.'
+            
+            if self.debug_mode:
+                print(f"[DEBUG] POS Tags: {pos_tags}")
+                print(f"[DEBUG] Added punctuation: {text}")
+            
+            return text
+            
+        except Exception as e:
+            if self.debug_mode:
+                print(f"[DEBUG] Punctuation restoration error: {e}")
+            # Fallback on error
+            return self._fallback_punctuation(text)
+    
+    def _fallback_punctuation(self, text):
+        """Fallback punctuation method for when NLTK is not available"""
+        if not text or text[-1] in '.!?,;:':
+            return text
+        
+        # Simple question detection
+        question_words = ['what', 'when', 'where', 'who', 'why', 'how', 'is', 'are', 'do', 'does', 
+                         'can', 'could', 'will', 'would', 'should', 'have', 'has', 'did', 'do']
+        
+        first_word = text.split()[0].lower() if text.split() else ""
+        
+        if first_word in question_words:
+            return text + '?'
+        else:
+            return text + '.'
+        
+    def improve_recognition_accuracy(self, audio):
+        """
+        Try multiple recognition methods with fallback for better accuracy
+        Returns tuple of (text, confidence_score)
+        
+        Supports:
+        - Whisper (better for French and multilingual)
+        - Google Speech Recognition (free fallback)
+        """
+        recognized_text = None
+        best_score = 0
+        
+        try:
+            # Method 1: Whisper (best for French and multilingual)
+            if self.recognition_service == 'whisper' and WHISPER_AVAILABLE:
+                try:
+                    recognized_text, best_score = self._recognize_with_whisper(audio)
+                    if recognized_text:
+                        return recognized_text, best_score
+                except Exception as e:
+                    if self.debug_mode:
+                        print(f"[DEBUG] Whisper recognition error: {e}")
+                    # Fall through to Google
+            
+            # Method 2: Google Speech Recognition (fallback)
+            try:
+                language_code = f"{self.from_lang}-{self.from_lang.upper()}"
+                recognized_text = self.recognizer.recognize_google(
+                    audio,
+                    language=language_code,
+                    show_all=False
+                )
+                best_score = 0.8  # Baseline confidence
+                
+                if self.debug_mode:
+                    print(f"[DEBUG] Google recognition successful: {recognized_text}")
+                
+                return recognized_text, best_score
+                
+            except sr.UnknownValueError:
+                if self.debug_mode:
+                    print("[DEBUG] Google recognition: Could not understand audio")
+            except sr.RequestError as e:
+                if self.debug_mode:
+                    print(f"[DEBUG] Google API error: {e}")
+        
+        except Exception as e:
+            if self.debug_mode:
+                print(f"[DEBUG] Recognition error: {e}")
+        
+        return None, 0
+    
+    def _recognize_with_whisper(self, audio):
+        """
+        Recognize speech using OpenAI's Whisper model
+        Much better for French and multilingual support
+        
+        Returns tuple of (text, confidence_score)
+        """
+        if not WHISPER_AVAILABLE:
+            return None, 0
+        
+        try:
+            # Load model if not already loaded
+            if self.whisper_processor is None:
+                if self.debug_mode:
+                    print(f"[DEBUG] Loading Whisper model: {self.whisper_model}")
+                self.whisper_processor = whisper.load_model(
+                    self.whisper_model,
+                    device=self.whisper_device
+                )
+            
+            # Convert audio to wav format for Whisper
+            audio_data = audio.get_wav_data()
+            
+            # Create temporary wav file
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_file.write(audio_data)
+                temp_path = temp_file.name
+            
+            try:
+                # Transcribe with Whisper
+                if self.debug_mode:
+                    print(f"[DEBUG] Transcribing with Whisper ({self.from_lang})...")
+                
+                result = self.whisper_processor.transcribe(
+                    temp_path,
+                    language=self.from_lang,
+                    fp16=False  # Set to True if GPU available
+                )
+                
+                # Whisper returns dict with "text" key containing transcribed text
+                recognized_text = result.get("text", "").strip() if isinstance(result, dict) else str(result).strip()
+                
+                if self.debug_mode:
+                    print(f"[DEBUG] Whisper recognition successful: {recognized_text}")
+                
+                return recognized_text, 0.9
+                
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+        
+        except Exception as e:
+            if self.debug_mode:
+                print(f"[DEBUG] Whisper error: {e}")
+            return None, 0
+        
+    def filter_recognition_noise(self, text):
+        """
+        Filter out common recognition errors and noise patterns
+        Improves overall recognition quality
+        """
+        if not text:
+            return text
+        
+        # Common noise patterns to remove or fix
+        noise_patterns = {
+            'inaudible': '',
+            'music': '',
+            '[background noise]': '',
+            '[silence]': '',
+            '[cough]': '',
+        }
+        
+        result = text
+        for pattern, replacement in noise_patterns.items():
+            result = result.replace(pattern, replacement)
+        
+        # Clean up extra spaces
+        result = ' '.join(result.split())
+        
+        return result
         
     def setup_microphone(self):
         """Setup and calibrate microphone"""
@@ -238,16 +490,19 @@ class RealTimeTranslator:
                 time.sleep(1)
     
     def process_audio(self, audio):
-        """Process audio in background thread"""
+        """Process audio in background thread with improved recognition and punctuation"""
         try:
-            # Recognize speech with specified language
-            # Use proper locale codes for better recognition
-            language_code = f"{self.from_lang}-{self.from_lang.upper()}"
+            # Use improved recognition method
+            original_text, confidence = self.improve_recognition_accuracy(audio)
             
-            # Try recognition with show_all to get better results
-            original_text = self.recognizer.recognize_google(audio, 
-                                                            language=language_code,
-                                                            show_all=False)
+            if not original_text:
+                return  # No speech detected
+            
+            # Filter out noise patterns
+            original_text = self.filter_recognition_noise(original_text)
+            
+            # Restore punctuation using NLTK
+            original_text = self.restore_punctuation(original_text)
             
             # Log original text to daily voice log
             self.voice_logger.log_original_text(original_text, self.original_prefix.rstrip(':'))
